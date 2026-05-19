@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
   collection,
@@ -13,8 +13,6 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-
-const FIREBASE_CONFIG_STORAGE_KEY = "boss_queue_firebase_config_v1";
 
 const DEFAULT_FIREBASE_CONFIG = {
   apiKey: "AIzaSyCe2KTRR-T7aFuKjVeZizyPRJ34jGw91BQ",
@@ -31,47 +29,10 @@ const DEFAULT_ADMIN_PIN = "1234";
 
 let firebaseApp = null;
 let firestoreDb = null;
-let activeFirebaseConfigKey = "";
 
-function readSavedFirebaseConfig() {
-  return DEFAULT_FIREBASE_CONFIG;
-}
-
-function saveFirebaseConfig(config) {
-  try {
-    if (typeof window === "undefined" || !window.localStorage) return;
-    window.localStorage.setItem(FIREBASE_CONFIG_STORAGE_KEY, JSON.stringify(config));
-  } catch {
-    // ignore
-  }
-}
-
-function parseFirebaseConfigText(text) {
-  const source = String(text || "");
-  const fields = ["apiKey", "authDomain", "projectId", "storageBucket", "messagingSenderId", "appId"];
-  const result = { ...DEFAULT_FIREBASE_CONFIG };
-
-  fields.forEach((field) => {
-    const reg = new RegExp(`${field}\\s*:\\s*["']([^"']+)["']`);
-    const found = source.match(reg);
-    if (found?.[1]) result[field] = found[1].trim();
-  });
-
-  return result;
-}
-
-function isFirebaseConfigured(config = readSavedFirebaseConfig()) {
-  return Boolean(config.apiKey && config.projectId && config.appId);
-}
-
-function getDb(config = readSavedFirebaseConfig()) {
-  if (!isFirebaseConfigured(config)) return null;
-  const configKey = JSON.stringify(config);
-  if (!firebaseApp || activeFirebaseConfigKey !== configKey) {
-    firebaseApp = initializeApp(config, `boss-queue-${Date.now()}`);
-    firestoreDb = getFirestore(firebaseApp);
-    activeFirebaseConfigKey = configKey;
-  }
+function getDb() {
+  if (!firebaseApp) firebaseApp = initializeApp(DEFAULT_FIREBASE_CONFIG);
+  if (!firestoreDb) firestoreDb = getFirestore(firebaseApp);
   return firestoreDb;
 }
 
@@ -106,11 +67,21 @@ function getTodayKey(date = new Date()) {
 }
 
 function todayDisplay(date = new Date()) {
-  return date.toLocaleDateString("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", weekday: "long" });
+  return date.toLocaleDateString("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "long",
+  });
 }
 
 function nowText(date = new Date()) {
-  return date.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Taipei" });
+  return date.toLocaleTimeString("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Taipei",
+  });
 }
 
 function safeNumber(value, fallback = 5) {
@@ -120,15 +91,6 @@ function safeNumber(value, fallback = 5) {
 
 function safeText(value, fallback = "") {
   return String(value ?? fallback).trim();
-}
-
-function getCurrentUrl() {
-  try {
-    if (typeof window === "undefined" || !window.location) return "";
-    return window.location.href || "";
-  } catch {
-    return "";
-  }
 }
 
 function createId() {
@@ -199,6 +161,55 @@ function sortWaiting(items, allowUrgentPriority = true) {
     });
 }
 
+// 通知功能只保留這一個檢查函式，避免重複宣告造成 build failed。
+function canUseNotification() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function getNotificationPermission() {
+  if (!canUseNotification()) return "unsupported";
+  return Notification.permission;
+}
+
+async function requestNotificationPermission() {
+  if (!canUseNotification()) return "unsupported";
+  if (Notification.permission === "granted") return "granted";
+  if (Notification.permission === "denied") return "denied";
+  return await Notification.requestPermission();
+}
+
+function showBrowserNotification(title, body) {
+  if (!canUseNotification() || Notification.permission !== "granted") return false;
+  try {
+    new Notification(title, { body, silent: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function playNotifySound() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audioCtx = new AudioContextClass();
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.08;
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      audioCtx.close();
+    }, 180);
+  } catch {
+    // 有些瀏覽器會限制自動播放聲音，忽略即可。
+  }
+}
+
 function exportCsv(rows) {
   const header = ["號碼", "姓名", "部門", "手機", "類型", "緊急", "預估分鐘", "狀態", "取號時間", "叫號時間", "完成時間", "備註"];
   const body = rows.map((item) => [
@@ -231,26 +242,27 @@ function exportCsv(rows) {
 async function tryCopyText(text) {
   if (!text) return { ok: false, reason: "empty" };
   try {
-    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
-      return { ok: true, method: "clipboard" };
+      return { ok: true };
     }
-  } catch {}
+  } catch {
+    // fallback below
+  }
   try {
-    if (typeof document !== "undefined" && document.body) {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.setAttribute("readonly", "");
-      textarea.style.position = "fixed";
-      textarea.style.left = "-9999px";
-      textarea.style.top = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      const copied = document.execCommand && document.execCommand("copy");
-      document.body.removeChild(textarea);
-      if (copied) return { ok: true, method: "execCommand" };
-    }
-  } catch {}
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    if (copied) return { ok: true };
+  } catch {
+    // ignore
+  }
   return { ok: false, reason: "blocked" };
 }
 
@@ -260,16 +272,25 @@ function buildCopyMessage(result) {
   return "瀏覽器阻擋自動複製。請直接複製下方顯示的網址。";
 }
 
+function getCurrentUrl() {
+  try {
+    return window.location.href || "";
+  } catch {
+    return "";
+  }
+}
+
 function runQueueTests() {
   const sample = [
     { id: "1", ticketNo: "A001", name: "甲", status: "waiting", urgency: "normal", createdAt: 10, dateKey: "20260518" },
     { id: "2", ticketNo: "A002", name: "乙", status: "waiting", urgency: "critical", createdAt: 20, dateKey: "20260518" },
     { id: "3", ticketNo: "A003", name: "丙", status: "waiting", urgency: "urgent", createdAt: 30, dateKey: "20260518" },
   ];
-  console.assert(sortWaiting(sample, true)[0].ticketNo === "A002", "測試失敗：非常急應該優先排序");
+  console.assert(sortWaiting(sample, true)[0].ticketNo === "A002", "測試失敗：非常急應優先排序");
   console.assert(sortWaiting(sample, false)[0].ticketNo === "A001", "測試失敗：關閉急件優先後應按照取號順序");
   console.assert(normalizeQueue(null).length === 0, "測試失敗：異常資料應回傳空陣列");
-  console.assert(parseFirebaseConfigText('apiKey: "abc", projectId: "pid", appId: "app"').projectId === "pid", "測試失敗：應可解析 Firebase config");
+  console.assert(normalizeSettings({ bossName: "董事長" }).bossName === "董事長", "測試失敗：設定應可覆蓋預設值");
+  console.assert(["unsupported", "default", "granted", "denied"].includes(getNotificationPermission()), "測試失敗：通知權限狀態應可辨識");
 }
 
 const styles = {
@@ -305,6 +326,7 @@ const styles = {
   copyBox: { background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", borderRadius: 16, padding: 12, marginTop: 12, wordBreak: "break-all", lineHeight: 1.6 },
   statusOk: { background: "#dcfce7", border: "1px solid #86efac", color: "#166534", borderRadius: 16, padding: 12, marginTop: 12 },
   statusBad: { background: "#fee2e2", border: "1px solid #fecaca", color: "#991b1b", borderRadius: 16, padding: 12, marginTop: 12 },
+  toast: { position: "fixed", right: 20, bottom: 20, zIndex: 9999, background: "#0f172a", color: "white", borderRadius: 18, padding: "14px 16px", boxShadow: "0 16px 40px rgba(15,23,42,0.28)", maxWidth: 360, lineHeight: 1.5 },
 };
 
 function Button({ children, active, danger, success, disabled, onClick, type = "button" }) {
@@ -316,8 +338,8 @@ function Field({ label, children }) {
   return <div><div style={styles.label}>{label}</div>{children}</div>;
 }
 
-function TextInput({ value, onChange, placeholder, type = "text", readOnly = false }) {
-  return <input type={type} style={styles.input} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} readOnly={readOnly} />;
+function TextInput({ value, onChange, placeholder, type = "text" }) {
+  return <input type={type} style={styles.input} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />;
 }
 
 function TextArea({ value, onChange, placeholder }) {
@@ -337,12 +359,7 @@ function CopyUrlPanel({ url, message }) {
   return (
     <div style={styles.copyBox}>
       <strong>{message}</strong>
-      {!message.includes("已複製") && url ? (
-        <div style={{ marginTop: 8 }}>
-          <input style={{ ...styles.input, background: "white" }} readOnly value={url} onFocus={(event) => event.target.select()} />
-          <div style={{ fontSize: 13, marginTop: 6 }}>點一下上方網址後按 Ctrl+C，或手機長按複製。</div>
-        </div>
-      ) : null}
+      {!message.includes("已複製") && url ? <input style={{ ...styles.input, background: "white", marginTop: 8 }} readOnly value={url} onFocus={(event) => event.target.select()} /> : null}
     </div>
   );
 }
@@ -388,49 +405,6 @@ function PinGate({ settings, onUnlock }) {
   );
 }
 
-function FirebaseSetup({ currentConfig, onSave }) {
-  const [rawText, setRawText] = useState("");
-  const [form, setForm] = useState(currentConfig || DEFAULT_FIREBASE_CONFIG);
-
-  function applyRawText() {
-    const parsed = parseFirebaseConfigText(rawText);
-    setForm((prev) => ({ ...prev, ...parsed }));
-  }
-
-  function save() {
-    if (!isFirebaseConfigured(form)) {
-      alert("請至少填入 apiKey、projectId、appId。建議直接貼上 Firebase Console 的完整 firebaseConfig。");
-      return;
-    }
-    onSave(form);
-  }
-
-  return (
-    <section style={{ ...styles.card, ...styles.section }}>
-      <h2 style={{ marginTop: 0 }}>Firebase 雲端同步設定</h2>
-      <p style={styles.muted}>把 Firebase Console 產生的 <strong>firebaseConfig</strong> 整段貼到下面，按「解析設定」，再按「儲存並連線」。之後不用再改程式碼。</p>
-      <Field label="貼上 Firebase config">
-        <TextArea value={rawText} onChange={setRawText} placeholder={'例如：const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", appId: "..." }'} />
-      </Field>
-      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Button onClick={applyRawText}>解析設定</Button>
-        <Button success onClick={save}>儲存並連線</Button>
-      </div>
-      <div style={{ ...styles.grid2, marginTop: 16 }}>
-        <Field label="apiKey"><TextInput value={form.apiKey} onChange={(v) => setForm((p) => ({ ...p, apiKey: v }))} /></Field>
-        <Field label="authDomain"><TextInput value={form.authDomain} onChange={(v) => setForm((p) => ({ ...p, authDomain: v }))} /></Field>
-        <Field label="projectId"><TextInput value={form.projectId} onChange={(v) => setForm((p) => ({ ...p, projectId: v }))} /></Field>
-        <Field label="storageBucket"><TextInput value={form.storageBucket} onChange={(v) => setForm((p) => ({ ...p, storageBucket: v }))} /></Field>
-        <Field label="messagingSenderId"><TextInput value={form.messagingSenderId} onChange={(v) => setForm((p) => ({ ...p, messagingSenderId: v }))} /></Field>
-        <Field label="appId"><TextInput value={form.appId} onChange={(v) => setForm((p) => ({ ...p, appId: v }))} /></Field>
-      </div>
-      <div style={{ ...styles.note, marginTop: 16 }}>
-        Firestore Database 請先在 Firebase Console 啟用。測試階段可先用 test mode；正式使用建議再調整安全規則。
-      </div>
-    </section>
-  );
-}
-
 export default function BossQueueSystemCloud() {
   const [queue, setQueue] = useState([]);
   const [settings, setSettings] = useState(defaultSettings);
@@ -449,15 +423,34 @@ export default function BossQueueSystemCloud() {
   const [manualCopyUrl, setManualCopyUrl] = useState("");
   const [syncStatus, setSyncStatus] = useState("checking");
   const [errorMessage, setErrorMessage] = useState("");
-  const [firebaseConfig, setFirebaseConfig] = useState(() => readSavedFirebaseConfig());
+  const [notificationPermission, setNotificationPermission] = useState(() => getNotificationPermission());
+  const [toastMessage, setToastMessage] = useState("");
+  const [hasLoadedQueue, setHasLoadedQueue] = useState(false);
+  const seenTicketIdsRef = useRef(new Set());
+  const lastServingIdRef = useRef("");
 
-  const db = useMemo(() => getDb(firebaseConfig), [firebaseConfig]);
+  const db = useMemo(() => getDb(), []);
+
+  function notifyUser(title, body) {
+    setToastMessage(`${title}：${body}`);
+    setTimeout(() => setToastMessage(""), 5000);
+    showBrowserNotification(title, body);
+    playNotifySound();
+  }
+
+  async function enableNotifications() {
+    const permission = await requestNotificationPermission();
+    setNotificationPermission(permission);
+    if (permission === "granted") notifyUser("通知已啟用", "有人取號或被叫號時，這台裝置會跳出提醒。");
+    else if (permission === "denied") alert("通知被瀏覽器封鎖了，請到瀏覽器網址列旁邊的網站設定中允許通知。");
+    else alert("這個瀏覽器不支援桌面通知，系統仍會顯示畫面提醒。");
+  }
 
   useEffect(() => {
     runQueueTests();
     if (!db) {
       setSyncStatus("not_configured");
-      setErrorMessage("尚未設定 Firebase。請到下方設定區貼上 Firebase Console 提供的 firebaseConfig。");
+      setErrorMessage("Firebase 尚未連線，請確認 Firestore Database 已啟用。");
       return;
     }
 
@@ -465,23 +458,40 @@ export default function BossQueueSystemCloud() {
     const todayKey = getTodayKey();
     const q = query(queueCollection(db), where("dateKey", "==", todayKey));
 
-    const unsubscribeQueue = onSnapshot(q, (snapshot) => {
-      const rows = snapshot.docs.map((snap) => ({ id: snap.id, ...snap.data() }));
-      setQueue(normalizeQueue(rows));
-      setSyncStatus("online");
-      setErrorMessage("");
-    }, (error) => {
-      setSyncStatus("error");
-      setErrorMessage(`Firestore 讀取失敗：${error.message}`);
-    });
+    const unsubscribeQueue = onSnapshot(
+      q,
+      (snapshot) => {
+        const rows = normalizeQueue(snapshot.docs.map((snap) => ({ id: snap.id, ...snap.data() })));
+        const currentIds = new Set(rows.map((item) => item.id));
 
-    const unsubscribeSettings = onSnapshot(settingsDoc(db), async (snapshot) => {
-      if (snapshot.exists()) setSettings(normalizeSettings(snapshot.data()));
-      else await setDoc(settingsDoc(db), defaultSettings, { merge: true });
-    }, (error) => {
-      setSyncStatus("error");
-      setErrorMessage(`設定讀取失敗：${error.message}`);
-    });
+        if (seenTicketIdsRef.current.size > 0) {
+          const newTickets = rows.filter((item) => !seenTicketIdsRef.current.has(item.id) && item.status === "waiting");
+          newTickets.forEach((item) => notifyUser("有人取號了", `${item.ticketNo}｜${item.name}｜${item.type}`));
+        }
+
+        seenTicketIdsRef.current = currentIds;
+        setQueue(rows);
+        setHasLoadedQueue(true);
+        setSyncStatus("online");
+        setErrorMessage("");
+      },
+      (error) => {
+        setSyncStatus("error");
+        setErrorMessage(`Firestore 讀取失敗：${error.message}`);
+      }
+    );
+
+    const unsubscribeSettings = onSnapshot(
+      settingsDoc(db),
+      async (snapshot) => {
+        if (snapshot.exists()) setSettings(normalizeSettings(snapshot.data()));
+        else await setDoc(settingsDoc(db), defaultSettings, { merge: true });
+      },
+      (error) => {
+        setSyncStatus("error");
+        setErrorMessage(`設定讀取失敗：${error.message}`);
+      }
+    );
 
     return () => {
       unsubscribeQueue();
@@ -498,6 +508,13 @@ export default function BossQueueSystemCloud() {
   const cancelled = useMemo(() => todayQueue.filter((item) => item.status === "cancelled"), [todayQueue]);
   const sortedWaiting = useMemo(() => sortWaiting(todayQueue, settings.allowUrgentPriority), [todayQueue, settings.allowUrgentPriority]);
   const totalWaitingMinutes = sortedWaiting.reduce((sum, item) => sum + safeNumber(item.minutes, 5), 0);
+
+  useEffect(() => {
+    if (!hasLoadedQueue || !serving?.id) return;
+    if (lastServingIdRef.current === serving.id) return;
+    lastServingIdRef.current = serving.id;
+    notifyUser("輪到號碼", `${serving.ticketNo}｜${serving.name}｜請前往${settings.bossName}辦公室`);
+  }, [serving?.id, hasLoadedQueue, settings.bossName]);
 
   async function copyCurrentUrl() {
     const url = getCurrentUrl();
@@ -573,7 +590,6 @@ export default function BossQueueSystemCloud() {
       const currentServing = todayQueue.find((item) => item.status === "serving");
       const next = sortedWaiting[0];
       if (!next) return;
-
       if (currentServing) await updateDoc(ticketDoc(db, currentServing.id), cleanObject({ status: "done", finishedTime: nowText(), updatedAt: Date.now() }));
       await updateDoc(ticketDoc(db, next.id), cleanObject({ status: "serving", calledTime: nowText(), updatedAt: Date.now() }));
       setView("display");
@@ -583,13 +599,11 @@ export default function BossQueueSystemCloud() {
   }
 
   async function completeCurrent() {
-    if (!serving) return;
-    await updateTicket(serving.id, { status: "done", finishedTime: nowText() });
+    if (serving) await updateTicket(serving.id, { status: "done", finishedTime: nowText() });
   }
 
   async function skipCurrent() {
-    if (!serving) return;
-    await updateTicket(serving.id, { status: "skipped", skippedTime: nowText() });
+    if (serving) await updateTicket(serving.id, { status: "skipped", skippedTime: nowText() });
   }
 
   async function cancelTicket(id) {
@@ -601,7 +615,6 @@ export default function BossQueueSystemCloud() {
   }
 
   async function saveSettingsPatch(patch) {
-    if (!db) return setSettings((prev) => ({ ...prev, ...patch }));
     const next = { ...settings, ...patch };
     setSettings(next);
     try {
@@ -612,13 +625,14 @@ export default function BossQueueSystemCloud() {
   }
 
   async function resetToday() {
-    if (!db) return alert("Firebase 尚未設定，無法清空資料。");
     const ok = typeof window === "undefined" || window.confirm("確定要清空今日資料嗎？此動作會刪除今日所有排隊紀錄。");
     if (!ok) return;
     try {
       const snapshot = await getDocs(query(queueCollection(db), where("dateKey", "==", getTodayKey())));
       await Promise.all(snapshot.docs.map((snap) => deleteDoc(snap.ref)));
       await setDoc(counterDoc(db, getTodayKey()), { count: 0, updatedAt: Date.now(), dateKey: getTodayKey() }, { merge: true });
+      seenTicketIdsRef.current = new Set();
+      lastServingIdRef.current = "";
     } catch (error) {
       alert(`清空失敗：${error.message}`);
     }
@@ -634,7 +648,6 @@ export default function BossQueueSystemCloud() {
   const needsPin = ["boss", "records", "settings"].includes(view) && !adminUnlocked;
   const syncText = {
     checking: "檢查連線中",
-    not_configured: "Firebase 尚未設定",
     connecting: "雲端連線中",
     online: "雲端同步中",
     error: "雲端連線異常",
@@ -654,7 +667,7 @@ export default function BossQueueSystemCloud() {
             <Button active={view === "boss"} onClick={() => setView("boss")}>老闆端</Button>
             <Button active={view === "records"} onClick={() => setView("records")}>紀錄</Button>
             <Button active={view === "settings"} onClick={() => setView("settings")}>設定</Button>
-            
+            <Button onClick={enableNotifications}>{notificationPermission === "granted" ? "通知已開" : "啟用通知"}</Button>
           </nav>
         </header>
 
@@ -662,8 +675,8 @@ export default function BossQueueSystemCloud() {
           <strong>{syncText}</strong>{errorMessage ? `｜${errorMessage}` : ""}
         </div>
 
-        {!db ? (
-          <div style={styles.statusBad}>Firebase 連線設定尚未成功，請確認 Firestore Database 已啟用。</div>
+        {notificationPermission !== "granted" ? (
+          <div style={styles.copyBox}><strong>提醒：</strong>要讓有人取號、被叫號時跳通知，請按右上方「啟用通知」，並在瀏覽器詢問時按「允許」。</div>
         ) : null}
 
         <section style={styles.stats} aria-label="目前排隊統計">
@@ -690,7 +703,7 @@ export default function BossQueueSystemCloud() {
             </div>
             <div style={{ marginTop: 14 }}><Field label="簡短說明"><TextArea placeholder="例如：請老闆核准付款單，或簡述要討論的事情" value={note} onChange={setNote} /></Field></div>
             <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button success onClick={addTicket} disabled={!db}>取號排隊</Button>
+              <Button success onClick={addTicket}>取號排隊</Button>
               <Button onClick={copyCurrentUrl}>複製取號網址</Button>
             </div>
             <CopyUrlPanel url={manualCopyUrl} message={copyMessage} />
@@ -738,10 +751,10 @@ export default function BossQueueSystemCloud() {
                 {serving?.note ? <div style={{ ...styles.note }}>{serving.note}</div> : null}
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                <Button success onClick={callNext} disabled={sortedWaiting.length === 0 || !db}>叫下一位</Button>
-                <Button onClick={completeCurrent} disabled={!serving || !db}>完成目前會議</Button>
-                <Button onClick={skipCurrent} disabled={!serving || !db}>跳過目前號碼</Button>
-                <Button danger onClick={resetToday} disabled={!db}>清空今日資料</Button>
+                <Button success onClick={callNext} disabled={sortedWaiting.length === 0}>叫下一位</Button>
+                <Button onClick={completeCurrent} disabled={!serving}>完成目前會議</Button>
+                <Button onClick={skipCurrent} disabled={!serving}>跳過目前號碼</Button>
+                <Button danger onClick={resetToday}>清空今日資料</Button>
               </div>
             </div>
             <div>
@@ -784,11 +797,11 @@ export default function BossQueueSystemCloud() {
               <Button onClick={copyCurrentUrl}>複製系統網址</Button>
             </div>
             <CopyUrlPanel url={manualCopyUrl} message={copyMessage} />
-            <div style={{ ...styles.note, marginTop: 18 }}>
-              Firebase 雲端同步版已啟用。員工手機取號、老闆端叫號、電視看板會即時同步。Firebase 設定已內建，不需要再手動貼設定。
-            </div>
+            <div style={{ ...styles.note, marginTop: 18 }}>通知功能：每台要接收通知的電腦或手機，都要先按一次「啟用通知」。</div>
           </section>
         ) : null}
+
+        {toastMessage ? <div style={styles.toast}>{toastMessage}</div> : null}
       </div>
     </main>
   );
