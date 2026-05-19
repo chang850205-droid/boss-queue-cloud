@@ -1,12 +1,11 @@
-# 張會預約 - 老闆會議排隊叫號系統
+# 張會預約 - 修正版
 
-Firebase 設定已內建。
-
-## Vercel 部署
-1. 解壓縮本 ZIP
-2. 到 Vercel Add New → Project
-3. 上傳整個 boss-queue-cloud-ready 資料夾
-4. Framework Preset 選 Vite
-5. 按 Deploy
+包含：
+- 員工取號
+- 老闆叫號
+- 客戶預約
+- 預約管理
+- 加入 Google 行事曆
+- 通知與提示音
 
 管理密碼預設：1234
