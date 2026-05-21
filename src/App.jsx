@@ -325,6 +325,7 @@ export default function App() {
   const [permission, setPermission] = useState(notificationPermission());
   const seenTickets = useRef(new Set());
   const lastServing = useRef("");
+  const lastIdleNotify = useRef(0);
 
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
@@ -410,11 +411,37 @@ export default function App() {
   }, [appointments]);
 
   useEffect(() => {
-    if (!serving?.id) return;
-    if (lastServing.current === serving.id) return;
-    lastServing.current = serving.id;
-    notify("輪到號碼", `${serving.ticketNo}｜${serving.name}｜請前往${settings.bossName}辦公室`);
-  }, [serving?.id, settings.bossName]);
+
+  const timer = setInterval(() => {
+
+    if (waiting.length === 0) return;
+
+    const oldest = waiting[0];
+
+    const waitingMinutes = Math.floor(
+      (Date.now() - oldest.createdAt) / 60000
+    );
+
+    // 避免每分鐘一直跳
+    if (
+      waitingMinutes >= 10 &&
+      waitingMinutes > lastIdleNotify.current
+    ) {
+
+      lastIdleNotify.current = waitingMinutes;
+
+      notify(
+        "⏰ 老闆提醒",
+        `目前 ${waiting.length} 人等待，最久已等 ${waitingMinutes} 分鐘`
+      );
+
+    }
+
+  },60000);
+
+  return () => clearInterval(timer);
+
+},[waiting]);
 
   async function addTicket() {
     if (!name.trim()) return alert("請填寫姓名");
