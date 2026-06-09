@@ -317,7 +317,18 @@ export default function App() {
   const [settings, setSettings] = useState(defaultSettings);
   const [tickets, setTickets] = useState([]);
   const [appointments, setAppointments] = useState([]);
-  const [view, setView] = useState("staff");
+  const getInitialView = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("view") || "staff";
+};
+
+const [view, setView] = useState(getInitialView);
+
+useEffect(() => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", view);
+  window.history.replaceState({}, "", url);
+}, [view]);
   const [unlocked, setUnlocked] = useState(false);
   const [syncStatus, setSyncStatus] = useState("checking");
   const [errorMessage, setErrorMessage] = useState("");
