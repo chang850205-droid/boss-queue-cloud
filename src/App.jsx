@@ -593,16 +593,49 @@ useEffect(() => {
             <h1 style={css.title}>{settings.companyName}</h1>
             <div style={css.muted}>{todayText()}｜{settings.bossName}會議排隊叫號<br />{settings.announcement}</div>
           </div>
-          <nav style={css.nav}>
-            <Button active={view === "staff"} onClick={() => setView("staff")}>員工取號</Button>
-            <Button active={view === "display"} onClick={() => setView("display")}>叫號看板</Button>
-            <Button active={view === "booking"} onClick={() => setView("booking")}>客戶預約</Button>
-            <Button active={view === "boss"} onClick={() => setView("boss")}>老闆端</Button>
-            <Button active={view === "appointments"} onClick={() => setView("appointments")}>預約管理</Button>
-            <Button active={view === "records"} onClick={() => setView("records")}>紀錄</Button>
-            <Button active={view === "settings"} onClick={() => setView("settings")}>設定</Button>
-            <Button onClick={enableNotifications}>{permission === "granted" ? "通知已開" : "啟用通知"}</Button>
-          </nav>
+         <nav style={css.nav}>
+
+  {view !== "boss" && (
+    <>
+      <Button active={view === "staff"} onClick={() => setView("staff")}>
+        員工取號
+      </Button>
+
+      <Button active={view === "display"} onClick={() => setView("display")}>
+        叫號看板
+      </Button>
+
+      <Button active={view === "booking"} onClick={() => setView("booking")}>
+        客戶預約
+      </Button>
+    </>
+  )}
+
+  {view === "boss" && (
+    <>
+      <Button active={view === "boss"} onClick={() => setView("boss")}>
+        老闆端
+      </Button>
+
+      <Button active={view === "appointments"} onClick={() => setView("appointments")}>
+        預約管理
+      </Button>
+
+      <Button active={view === "records"} onClick={() => setView("records")}>
+        紀錄
+      </Button>
+
+      <Button active={view === "settings"} onClick={() => setView("settings")}>
+        設定
+      </Button>
+    </>
+  )}
+
+  <Button onClick={enableNotifications}>
+    {permission === "granted" ? "通知已開" : "啟用通知"}
+  </Button>
+
+</nav>
         </header>
 
         <div style={syncStatus === "online" ? css.statusOk : css.statusBad}>
