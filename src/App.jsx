@@ -364,20 +364,24 @@ const [myTicketId, setMyTicketId] = useState(
   const [manualUrl, setManualUrl] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
 
-  function notify(title, body) {
-    setToast(`${title}：${body}`);
-    if(title.includes("輪到號碼")){
-   setCenterPopup(`${title}\n${body}`);
+ function notify(title, body) {
+  setToast(`${title}：${body}`);
+  setTimeout(() => setToast(""), 5000);
 
-   setTimeout(()=>{
+  if (title.includes("輪到號碼")) {
+    setCenterPopup(`${title}\n${body}`);
+
+    setTimeout(() => {
       setCenterPopup("");
-   },15000);
+    }, 15000);
+  }
+
+  if (canNotify() && Notification.permission === "granted") {
+    try { new Notification(title, { body }); } catch {}
+  }
+
+  beep();
 }
-    setTimeout(() => setToast(""), 5000);
-    if (canNotify() && Notification.permission === "granted") {
-      try { new Notification(title, { body }); } catch {}
-    }
-    beep();
     if (
   title.includes("輪到號碼")
 ) {
@@ -846,57 +850,43 @@ setMyTicketId(item.id);
         ) : null}
 
         {toast ? <div style={css.toast}>{toast}</div> : null}
-        {centerPopup ? (
-  <div
-    style={{
-      position:"fixed",
-      top:"50%",
-      left:"50%",
-      transform:"translate(-50%,-50%)",
-      background:"white",
-      padding:"40px",
-      borderRadius:"24px",
-      zIndex:99999,
-      boxShadow:"0 20px 60px rgba(0,0,0,.3)",
-      textAlign:"center",
-      minWidth:"320px"
-    }}
-  >
-    <div
-      style={{
-        fontSize:"32px",
-        fontWeight:"900",
-        marginBottom:"20px"
-      }}
-    >
+       {centerPopup ? (
+  <div style={{
+    position: "fixed",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%,-50%)",
+    background: "white",
+    padding: "40px",
+    borderRadius: "24px",
+    zIndex: 99999,
+    boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+    textAlign: "center",
+    minWidth: "320px"
+  }}>
+    <div style={{ fontSize: "32px", fontWeight: "900", marginBottom: "20px" }}>
       🔔 輪到您了
     </div>
 
-    <div
-      style={{
-        fontSize:"24px",
-        lineHeight:"1.8"
-      }}
-    >
+    <div style={{ fontSize: "24px", lineHeight: "1.8", whiteSpace: "pre-line" }}>
       {centerPopup}
     </div>
 
     <button
       style={{
-        marginTop:"24px",
-        padding:"12px 20px",
-        borderRadius:"14px",
-        border:"none",
-        background:"#0f172a",
-        color:"white",
-        fontWeight:"900",
-        cursor:"pointer"
+        marginTop: "24px",
+        padding: "12px 20px",
+        borderRadius: "14px",
+        border: "none",
+        background: "#0f172a",
+        color: "white",
+        fontWeight: "900",
+        cursor: "pointer"
       }}
-      onClick={()=>setCenterPopup("")}
+      onClick={() => setCenterPopup("")}
     >
       我知道了
     </button>
-
   </div>
 ) : null}
       </div>
