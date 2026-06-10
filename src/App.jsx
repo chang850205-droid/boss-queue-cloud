@@ -157,7 +157,7 @@ function beep() {
     const ctx = new AudioContextClass();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.frequency.value = 880;
+    osc.frequency.value = 1200;
     gain.gain.value = 0.08;
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -165,7 +165,7 @@ function beep() {
     setTimeout(() => {
       osc.stop();
       ctx.close();
-    }, 180);
+ }, 600);
   } catch {}
 }
 function calendarDates(date, time, minutes) {
@@ -519,7 +519,10 @@ useEffect(() => {
       setLastAppointment(item);
       setClientName(""); setClientPhone(""); setClientEmail(""); setApptType("初次諮詢"); setApptDate(""); setApptTime(""); setApptMinutes("30"); setApptNote("");
       setView("appointmentDone");
-      notify("新增客戶預約", `${item.clientName}｜${item.date} ${item.time}｜${item.type}`);
+      notify(
+  "🔔 有新的客戶預約",
+  `${item.clientName}｜${item.date} ${item.time}｜${item.type}`
+);
     } catch (err) {
       alert(`新增預約失敗：${err.message}`);
     }
@@ -668,7 +671,7 @@ useEffect(() => {
             </div>
             <div style={{ marginTop: 14 }}><Field label="簡短說明"><TextArea value={note} setValue={setNote} placeholder="例如：請老闆核准付款單" /></Field></div>
             <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button success onClick={addTicket}>取號排隊</Button>
+              <Button success onClick={addTicket}>加入等待</Button>
               <Button onClick={copyUrl}>複製取號網址</Button>
             </div>
             {copyMessage ? <div style={css.note}><b>{copyMessage}</b>{manualUrl ? <input style={{ ...css.input, marginTop: 8 }} readOnly value={manualUrl} onFocus={(e) => e.target.select()} /> : null}</div> : null}
