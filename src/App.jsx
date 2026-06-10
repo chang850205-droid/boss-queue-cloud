@@ -364,27 +364,40 @@ const [myTicketId, setMyTicketId] = useState(
   const [manualUrl, setManualUrl] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
 
- function notify(title, body) {
+function notify(title, body) {
+
   setToast(`${title}：${body}`);
+
   setTimeout(() => setToast(""), 5000);
 
+  // 只有輪到號碼才跳中間視窗
   if (title.includes("輪到號碼")) {
-    setCenterPopup(`${title}\n${body}`);
+
+    setCenterPopup(
+`🔔 輪到您了
+
+${body}`
+    );
 
     setTimeout(() => {
       setCenterPopup("");
     }, 15000);
+
   }
 
-  if (canNotify() && Notification.permission === "granted") {
-    try { new Notification(title, { body }); } catch {}
+  // 瀏覽器通知
+  if (
+    canNotify() &&
+    Notification.permission === "granted"
+  ) {
+    try {
+      new Notification(title, { body });
+    } catch {}
   }
 
+  // 聲音
   beep();
 }
-    if (
-  title.includes("輪到號碼")
-) {
 
   setCenterPopup(
 `🔔 輪到您了
