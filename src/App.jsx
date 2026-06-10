@@ -347,7 +347,9 @@ useEffect(() => {
   const [minutes, setMinutes] = useState("5");
   const [note, setNote] = useState("");
   const [lastTicket, setLastTicket] = useState(null);
-
+const [myTicketId, setMyTicketId] = useState(
+  localStorage.getItem("myTicketId") || ""
+);
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [clientEmail, setClientEmail] = useState("");
@@ -376,6 +378,21 @@ useEffect(() => {
       try { new Notification(title, { body }); } catch {}
     }
     beep();
+    if (
+  title.includes("輪到號碼")
+) {
+
+  setCenterPopup(
+`🔔 輪到您了
+
+${body}`
+  );
+
+  setTimeout(() => {
+    setCenterPopup("");
+  }, 15000);
+
+}
   }
   async function enableNotifications() {
     const p = await askNotification();
@@ -494,6 +511,8 @@ useEffect(() => {
         tx.set(docTicket(id), clean(item));
       });
       setLastTicket(item);
+      localStorage.setItem("myTicketId", item.id);
+setMyTicketId(item.id);
       setName(""); setDepartment(""); setPhone(""); setType("簽核文件"); setUrgency("normal"); setMinutes("5"); setNote("");
       setView("ticketDone");
     } catch (err) {
