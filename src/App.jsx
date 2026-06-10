@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
@@ -165,7 +164,7 @@ function beep() {
     setTimeout(() => {
       osc.stop();
       ctx.close();
- }, 600);
+    }, 600);
   } catch {}
 }
 function calendarDates(date, time, minutes) {
@@ -317,18 +316,20 @@ export default function App() {
   const [settings, setSettings] = useState(defaultSettings);
   const [tickets, setTickets] = useState([]);
   const [appointments, setAppointments] = useState([]);
+
   const getInitialView = () => {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("view") || "staff";
-};
+    const params = new URLSearchParams(window.location.search);
+    return params.get("view") || "staff";
+  };
 
-const [view, setView] = useState(getInitialView);
+  const [view, setView] = useState(getInitialView);
 
-useEffect(() => {
-  const url = new URL(window.location.href);
-  url.searchParams.set("view", view);
-  window.history.replaceState({}, "", url);
-}, [view]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", view);
+    window.history.replaceState({}, "", url);
+  }, [view]);
+
   const [unlocked, setUnlocked] = useState(false);
   const [syncStatus, setSyncStatus] = useState("checking");
   const [errorMessage, setErrorMessage] = useState("");
@@ -347,9 +348,8 @@ useEffect(() => {
   const [minutes, setMinutes] = useState("5");
   const [note, setNote] = useState("");
   const [lastTicket, setLastTicket] = useState(null);
-const [myTicketId, setMyTicketId] = useState(
-  localStorage.getItem("myTicketId") || ""
-);
+  const [myTicketId, setMyTicketId] = useState(() => localStorage.getItem("myTicketId") || "");
+
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [clientEmail, setClientEmail] = useState("");
@@ -364,52 +364,15 @@ const [myTicketId, setMyTicketId] = useState(
   const [manualUrl, setManualUrl] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
 
-function notify(title, body) {
+  function notify(title, body) {
+    setToast(`${title}：${body}`);
+    setTimeout(() => setToast(""), 5000);
 
-  setToast(`${title}：${body}`);
+    if (canNotify() && Notification.permission === "granted") {
+      try { new Notification(title, { body }); } catch {}
+    }
 
-  setTimeout(() => setToast(""), 5000);
-
-  // 只有輪到號碼才跳中間視窗
-  if (title.includes("輪到號碼")) {
-
-    setCenterPopup(
-`🔔 輪到您了
-
-${body}`
-    );
-
-    setTimeout(() => {
-      setCenterPopup("");
-    }, 15000);
-
-  }
-
-  // 瀏覽器通知
-  if (
-    canNotify() &&
-    Notification.permission === "granted"
-  ) {
-    try {
-      new Notification(title, { body });
-    } catch {}
-  }
-
-  // 聲音
-  beep();
-}
-
-  setCenterPopup(
-`🔔 輪到您了
-
-${body}`
-  );
-
-  setTimeout(() => {
-    setCenterPopup("");
-  }, 15000);
-
-}
+    beep();
   }
   async function enableNotifications() {
     const p = await askNotification();
@@ -464,37 +427,49 @@ ${body}`
   }, [appointments]);
 
   useEffect(() => {
+    if (!serving?.id) return;
+    if (lastServing.current === serving.id) return;
 
-  const timer = setInterval(() => {
+    lastServing.current = serving.id;
 
-    if (waiting.length === 0) return;
-
-    const oldest = waiting[0];
-
-    const waitingMinutes = Math.floor(
-      (Date.now() - oldest.createdAt) / 60000
+    notify(
+      "輪到號碼",
+      `${serving.ticketNo}｜${serving.name}｜請前往${settings.bossName}辦公室`
     );
 
-    // 避免每分鐘一直跳
-    if (
-      waitingMinutes >= 10 &&
-      waitingMinutes > lastIdleNotify.current
-    ) {
+    if (serving.id === myTicketId) {
+      setCenterPopup(
+`🔔 輪到您了
 
-      lastIdleNotify.current = waitingMinutes;
+${serving.ticketNo}
+${serving.name}
 
-      notify(
-        "⏰ 老闆提醒",
-        `目前 ${waiting.length} 人等待，最久已等 ${waitingMinutes} 分鐘`
+請前往${settings.bossName}辦公室`
       );
 
+      setTimeout(() => setCenterPopup(""), 15000);
     }
+  }, [serving?.id, settings.bossName, myTicketId]);
 
-  },60000);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (waiting.length === 0) return;
 
-  return () => clearInterval(timer);
+      const oldest = waiting[0];
+      const waitingMinutes = Math.floor((Date.now() - oldest.createdAt) / 60000);
 
-},[waiting]);
+      if (waitingMinutes >= 10 && waitingMinutes > lastIdleNotify.current) {
+        lastIdleNotify.current = waitingMinutes;
+
+        notify(
+          "⏰ 老闆提醒",
+          `目前 ${waiting.length} 人等待，最久已等 ${waitingMinutes} 分鐘`
+        );
+      }
+    }, 60000);
+
+    return () => clearInterval(timer);
+  }, [waiting]);
 
   async function addTicket() {
     if (!name.trim()) return alert("請填寫姓名");
@@ -529,7 +504,7 @@ ${body}`
       });
       setLastTicket(item);
       localStorage.setItem("myTicketId", item.id);
-setMyTicketId(item.id);
+      setMyTicketId(item.id);
       setName(""); setDepartment(""); setPhone(""); setType("簽核文件"); setUrgency("normal"); setMinutes("5"); setNote("");
       setView("ticketDone");
     } catch (err) {
@@ -563,10 +538,7 @@ setMyTicketId(item.id);
       setLastAppointment(item);
       setClientName(""); setClientPhone(""); setClientEmail(""); setApptType("初次諮詢"); setApptDate(""); setApptTime(""); setApptMinutes("30"); setApptNote("");
       setView("appointmentDone");
-      notify(
-  "🔔 有新的客戶預約",
-  `${item.clientName}｜${item.date} ${item.time}｜${item.type}`
-);
+      notify("🔔 有新的客戶預約", `${item.clientName}｜${item.date} ${item.time}｜${item.type}`);
     } catch (err) {
       alert(`新增預約失敗：${err.message}`);
     }
@@ -640,49 +612,23 @@ setMyTicketId(item.id);
             <h1 style={css.title}>{settings.companyName}</h1>
             <div style={css.muted}>{todayText()}｜{settings.bossName}會議排隊叫號<br />{settings.announcement}</div>
           </div>
-         <nav style={css.nav}>
-
-  {view !== "boss" && (
-    <>
-      <Button active={view === "staff"} onClick={() => setView("staff")}>
-        員工取號
-      </Button>
-
-      <Button active={view === "display"} onClick={() => setView("display")}>
-        叫號看板
-      </Button>
-
-      <Button active={view === "booking"} onClick={() => setView("booking")}>
-        客戶預約
-      </Button>
-    </>
-  )}
-
-  {view === "boss" && (
-    <>
-      <Button active={view === "boss"} onClick={() => setView("boss")}>
-        老闆端
-      </Button>
-
-      <Button active={view === "appointments"} onClick={() => setView("appointments")}>
-        預約管理
-      </Button>
-
-      <Button active={view === "records"} onClick={() => setView("records")}>
-        紀錄
-      </Button>
-
-      <Button active={view === "settings"} onClick={() => setView("settings")}>
-        設定
-      </Button>
-    </>
-  )}
-
-  <Button onClick={enableNotifications}>
-    {permission === "granted" ? "通知已開" : "啟用通知"}
-  </Button>
-
-</nav>
+          <nav style={css.nav}>
+            {!["boss", "appointments", "records", "settings"].includes(view) ? (
+              <>
+                <Button active={view === "staff"} onClick={() => setView("staff")}>員工取號</Button>
+                <Button active={view === "display"} onClick={() => setView("display")}>叫號看板</Button>
+                <Button active={view === "booking"} onClick={() => setView("booking")}>客戶預約</Button>
+              </>
+            ) : (
+              <>
+                <Button active={view === "boss"} onClick={() => setView("boss")}>老闆端</Button>
+                <Button active={view === "appointments"} onClick={() => setView("appointments")}>預約管理</Button>
+                <Button active={view === "records"} onClick={() => setView("records")}>紀錄</Button>
+                <Button active={view === "settings"} onClick={() => setView("settings")}>設定</Button>
+              </>
+            )}
+            <Button onClick={enableNotifications}>{permission === "granted" ? "通知已開" : "啟用通知"}</Button>
+          </nav>
         </header>
 
         <div style={syncStatus === "online" ? css.statusOk : css.statusBad}>
@@ -863,45 +809,54 @@ setMyTicketId(item.id);
         ) : null}
 
         {toast ? <div style={css.toast}>{toast}</div> : null}
-       {centerPopup ? (
-  <div style={{
-    position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%,-50%)",
-    background: "white",
-    padding: "40px",
-    borderRadius: "24px",
-    zIndex: 99999,
-    boxShadow: "0 20px 60px rgba(0,0,0,.3)",
-    textAlign: "center",
-    minWidth: "320px"
-  }}>
-    <div style={{ fontSize: "32px", fontWeight: "900", marginBottom: "20px" }}>
-      🔔 輪到您了
-    </div>
-
-    <div style={{ fontSize: "24px", lineHeight: "1.8", whiteSpace: "pre-line" }}>
-      {centerPopup}
-    </div>
-
-    <button
-      style={{
-        marginTop: "24px",
-        padding: "12px 20px",
-        borderRadius: "14px",
-        border: "none",
-        background: "#0f172a",
-        color: "white",
-        fontWeight: "900",
-        cursor: "pointer"
-      }}
-      onClick={() => setCenterPopup("")}
-    >
-      我知道了
-    </button>
-  </div>
-) : null}
+        {centerPopup ? (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,.35)",
+              zIndex: 99999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+            }}
+          >
+            <div
+              style={{
+                background: "white",
+                padding: "40px",
+                borderRadius: "24px",
+                boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+                textAlign: "center",
+                minWidth: "320px",
+                maxWidth: "520px",
+              }}
+            >
+              <div style={{ fontSize: "32px", fontWeight: "900", marginBottom: "20px" }}>
+                🔔 輪到您了
+              </div>
+              <div style={{ fontSize: "24px", lineHeight: "1.8", whiteSpace: "pre-line" }}>
+                {centerPopup}
+              </div>
+              <button
+                style={{
+                  marginTop: "24px",
+                  padding: "12px 20px",
+                  borderRadius: "14px",
+                  border: "none",
+                  background: "#0f172a",
+                  color: "white",
+                  fontWeight: "900",
+                  cursor: "pointer",
+                }}
+                onClick={() => setCenterPopup("")}
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   );
